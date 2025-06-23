@@ -51,7 +51,25 @@ class ActivationRecorder(contextlib.AbstractContextManager):
     # Internal helpers
     # ---------------------------------------------------------------------
     def _match(self, name: str) -> bool:
-        """Return True if *name* matches *all* supplied patterns."""
+        """Check if a module name should be recorded.
+
+        The *patterns* argument passed to the recorder can be a single regex
+        or a list of regexes.  We consider a module a *match* only if its
+        fully-qualified name satisfies **all** of those regex patterns—this
+        gives you fine-grained control when several sub-patterns are needed
+        (e.g. layer type *and* index).
+
+        Parameters
+        ----------
+        name : str
+            The ``named_modules`` key for the sub-module currently being
+            inspected.
+
+        Returns
+        -------
+        bool
+            ``True`` if *name* should have a forward hook attached.
+        """
         for p in self.patterns:
             if isinstance(p, str):
                 if not re.fullmatch(p, name):
@@ -62,7 +80,22 @@ class ActivationRecorder(contextlib.AbstractContextManager):
         return True
 
     def _hook_fn(self, name: str):
+        """Factory that builds the real forward-hook function.
+
+        We need a *separate* hook function per matched sub-module so that the
+        captured activations can be keyed by the correct name.  This little
+        closure does exactly that: it keeps *name* in its scope and hands a
+        callable to PyTorch's ``register_forward_hook``.
+        """
         def _fn(_module, _inputs, output):
+            """The function PyTorch executes right after the module's forward.
+
+            * Detaches the tensor from the graph so we don't keep gradients
+              around.
+            * Optionally moves it to the user-requested ``device`` (default:
+              CPU) to free up GPU VRAM.
+            * Stashes it in ``self.activations`` under the sub-module's name.
+            """
             if isinstance(output, tuple):
                 output = output[0]
             detached = output.detach()
@@ -75,6 +108,7 @@ class ActivationRecorder(contextlib.AbstractContextManager):
         return _fn
 
     def _register(self) -> None:
+        """Iterate through *all* sub-modules and attach hooks to the matches."""
         for name, mod in self.model.named_modules():
             if name == "":  # skip top-level container to avoid duplicate capture
                 continue
@@ -86,10 +120,12 @@ class ActivationRecorder(contextlib.AbstractContextManager):
     # Context manager protocol
     # ------------------------------------------------------------------
     def __enter__(self):
+        """Context-manager entry: attach hooks and return *self*."""
         self._register()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        """Remove hooks on exit so the model behaves normally afterwards."""
         for h in self._hooks:
             h.remove()
         self._hooks.clear()
@@ -106,5 +142,13 @@ def register_activation_hooks(
     patterns: List[_Pattern] | _Pattern = ".*",
     device: torch.device | str | None = None,
 ) -> ActivationRecorder:
-    """Return an *ActivationRecorder* and register hooks immediately."""
+    """Convenience helper so you don't have to use *with* if you don't want.
+
+    Example
+    -------
+    >>> rec = register_activation_hooks(model, r"blocks\.0")
+    >>> _ = model(batch)
+    >>> print(rec.activations.keys())
+    >>> rec.__exit__(None, None, None)  # manually dispose the hooks
+    """
     return ActivationRecorder(model, patterns, device) 
