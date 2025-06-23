@@ -8,15 +8,14 @@ from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 
 def update_submodules():
-    base_dir = os.path.dirname(__file__)
-    # Check if the .git folder exists
-    if os.path.exists(os.path.join(base_dir, '.git')):
-        print("Updating git submodules...")
-        # Run submodule init and update for 'vortex'
-        subprocess.check_call(['git', 'submodule', 'init', 'vortex'], cwd=base_dir)
-        subprocess.check_call(['git', 'submodule', 'update', 'vortex'], cwd=base_dir)
-    else:
-        print("No .git directory found; skipping submodule update.")
+    """No-op in development images.
+
+    The `vortex` directory is now vendored or volume-mounted directly instead of
+    being updated via `git submodule`.  Running git commands here clashes with
+    local, uncommitted edits that developers frequently hot-reload inside the
+    container, so we intentionally skip all sub-module operations.
+    """
+    print("Skipping git sub-module update for vortex (dev mode).")
 
 def run_make_setup_full():
     base_dir = os.path.dirname(__file__)
@@ -88,7 +87,8 @@ setup(
     },
     package_data={'evo2': ['evo2/configs/*.yml']},
     include_package_data=True,
-    python_requires='>=3.11',
+    # python_requires='>=3.11',
+    python_requires='>=3.10',
     license="Apache-2.0",
     description='Genome modeling across all domains of life',
     long_description=readme,
