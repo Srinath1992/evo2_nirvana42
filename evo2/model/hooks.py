@@ -36,6 +36,8 @@ class ActivationRecorder(contextlib.AbstractContextManager):
         model: nn.Module,
         patterns: List[_Pattern] | _Pattern = ".*",
         device: torch.device | str | None = None,
+        *,
+        layers: set[int] | None = None,
     ) -> None:
         self.model = model
         if isinstance(patterns, (str, re.Pattern)):
@@ -46,6 +48,9 @@ class ActivationRecorder(contextlib.AbstractContextManager):
 
         self.activations: Dict[str, torch.Tensor] = {}
         self._hooks: List[torch.utils.hooks.RemovableHandle] = []
+
+        # Optional whitelist of layer indices parsed from module names (e.g. blocks.<id>)
+        self.layers = layers
 
     # ---------------------------------------------------------------------
     # Internal helpers
@@ -77,7 +82,17 @@ class ActivationRecorder(contextlib.AbstractContextManager):
             else:  # compiled regex
                 if p.fullmatch(name) is None:
                     return False
-        return True
+
+        # Passed regex filter – optionally filter by layer id if self.layers provided
+        if self.layers is None:
+            return True
+
+        m = re.search(r"blocks\.(\d+)", name)
+        if m is None:
+            # Could not extract layer id; reject to prevent false capture
+            return False
+        layer_id = int(m.group(1))
+        return layer_id in self.layers
 
     def _hook_fn(self, name: str):
         """Factory that builds the real forward-hook function.
@@ -141,6 +156,7 @@ def register_activation_hooks(
     model: nn.Module,
     patterns: List[_Pattern] | _Pattern = ".*",
     device: torch.device | str | None = None,
+    layers: set[int] | None = None,
 ) -> ActivationRecorder:
     """Convenience helper so you don't have to use *with* if you don't want.
 
@@ -151,4 +167,4 @@ def register_activation_hooks(
     >>> print(rec.activations.keys())
     >>> rec.__exit__(None, None, None)  # manually dispose the hooks
     """
-    return ActivationRecorder(model, patterns, device) 
+    return ActivationRecorder(model, patterns, device, layers=layers) 

@@ -65,3 +65,43 @@ def make_phylotag_from_gbif(
 
     return phylo_tag.upper()
 
+
+# ---------------------------------------------------------------------------
+# CLI utilities
+# ---------------------------------------------------------------------------
+
+import re
+
+
+def parse_layer_spec(spec: str) -> set[int] | None:
+    """Parse layer specification strings into a set of ints or *None* (all).
+
+    Examples
+    --------
+    >>> parse_layer_spec("26")
+    {26}
+    >>> parse_layer_spec("0-2")
+    {0, 1, 2}
+    >>> parse_layer_spec("1,3,5")
+    {1, 3, 5}
+    >>> parse_layer_spec("all") is None
+    True
+    """
+    spec = spec.strip()
+    if spec.lower() in {"all", "*"}:
+        return None
+
+    if re.fullmatch(r"\d+", spec):  # single
+        return {int(spec)}
+
+    if re.fullmatch(r"\d+-\d+", spec):  # range
+        lo, hi = map(int, spec.split("-"))
+        if lo > hi:
+            lo, hi = hi, lo
+        return set(range(lo, hi + 1))
+
+    if re.fullmatch(r"(\d+,)+\d+", spec):  # comma list
+        return {int(x) for x in spec.split(",")}
+
+    raise ValueError(f"Unrecognised layer spec: {spec}")
+
